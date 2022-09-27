@@ -2,9 +2,11 @@ from trading_app import app, db, bcrypt, forms, TOKEN
 from flask import render_template, redirect, url_for, flash, request
 from flask_login import login_required, current_user, login_user, logout_user
 from trading_app.models import Transaction, User
-from datetime import datetime, timedelta
 import requests
+from trading_app.stock_price_api import PolygonAPI, WrongStockShortName, APILimitReached
+from requests.exceptions import ConnectionError
 
+api = PolygonAPI(TOKEN)
 
 @app.route("/")
 def index():
@@ -103,20 +105,20 @@ def trade():
     form = forms.TradeForm()
     if form.validate_on_submit():
         transactions = Transaction.query.filter_by(user_id=current_user.id)
-        yesterday = datetime.now() - timedelta(1)
-        yesterday = datetime.strftime(yesterday, "%Y-%m-%d")
         if form.buy_sell.data == "buy":
             cash_balance = sum(
                 [transaction.transaction_amount for transaction in transactions.all()]
             )
-
-            url = f"https://api.polygon.io/v1/open-close/{form.name.data}/{yesterday}?adjusted=true&apiKey={TOKEN}"
-            r = requests.get(url)
-            data = r.json()
-            if data["status"] != "OK":
-                flash("Stock does not exist", "error")
-            else:
-                price = data["close"]
+            price = None
+            try:
+                price = api.get_price(form.name.data)
+            except WrongStockShortName:
+                flash("No such stock found")
+            except APILimitReached:
+                flash("Our API limit is reached, please wait a few minutes and try again")
+            except ConnectionError:
+                flash("Our API is down try again later")
+            if price:
                 required_balance = price * form.quantity.data
                 if cash_balance >= required_balance:
                     t = Transaction(
@@ -124,7 +126,7 @@ def trade():
                         transaction_type=form.buy_sell.data,
                         stock_name=form.name.data,
                         stock_quantity=form.quantity.data,
-                        user_id=current_user.id,
+                        user_id=current_user.id
                     )
                     db.session.add(t)
                     db.session.commit()
@@ -178,18 +180,18 @@ def trade():
 def get_price():
     form = forms.StockShortNameForm()
     if form.validate_on_submit():
-        yesterday = datetime.now() - timedelta(1)
-        yesterday = datetime.strftime(yesterday, "%Y-%m-%d")
-        url = f"https://api.polygon.io/v1/open-close/{form.name.data}/{yesterday}?adjusted=true&apiKey={TOKEN}"
-        print(url)
-        r = requests.get(url)
-        data = r.json()
-        if data["status"] != "OK":
-            flash("Stock does not exist")
-        else:
-            print(data["close"])
+        price = None
+        try:
+            price = api.get_price(form.name.data)
+        except WrongStockShortName:
+            flash("No such stock found")
+        except APILimitReached:
+            flash("Our API limit is reached, please wait a few minutes and try again")
+        except ConnectionError:
+            flash("Our API is down try again later")
+        finally:
             return render_template(
-                "get_price.html", form=form, stock_price=data["close"]
+                "get_price.html", form=form, stock_price=price
             )
     return render_template("get_price.html", form=form)
 
