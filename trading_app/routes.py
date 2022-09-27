@@ -5,6 +5,7 @@ from trading_app.models import Transaction, User
 import requests
 from trading_app.stock_price_api import PolygonAPI, WrongStockShortName, APILimitReached
 from requests.exceptions import ConnectionError
+from datetime import datetime, timedelta
 
 api = PolygonAPI(TOKEN)
 
@@ -149,6 +150,8 @@ def trade():
                 ]
             )
             if stocks_left >= form.quantity.data:
+                yesterday = datetime.now() - timedelta(1)
+                yesterday = datetime.strftime(yesterday, "%Y-%m-%d")
                 url = f"https://api.polygon.io/v1/open-close/{form.name.data}/{yesterday}?adjusted=true&apiKey={TOKEN}"
                 r = requests.get(url)
                 data = r.json()
